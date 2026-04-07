@@ -38,7 +38,8 @@ export async function deliverWebReply(params: {
   skipLog?: boolean;
   tableMode?: MarkdownTableMode;
 }) {
-  const { replyResult, msg, maxMediaBytes, textLimit, replyLogger, connectionId, skipLog } = params;
+  let { replyResult } = params;
+  const { msg, maxMediaBytes, textLimit, replyLogger, connectionId, skipLog } = params;
   const replyStarted = Date.now();
   if (isReasoningReplyPayload(replyResult)) {
     whatsappOutboundLog.debug(`Suppressed reasoning payload to ${msg.from}`);
@@ -64,6 +65,12 @@ export async function deliverWebReply(params: {
     if (hookResult?.cancel) {
       whatsappOutboundLog.info(`Outbound to ${msg.from} cancelled by message_sending hook`);
       return;
+    }
+    if (
+      typeof hookResult?.content === "string" &&
+      hookResult.content !== (replyResult.text || "")
+    ) {
+      replyResult = { ...replyResult, text: hookResult.content };
     }
   }
 
