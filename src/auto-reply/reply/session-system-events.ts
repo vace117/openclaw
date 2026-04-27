@@ -32,6 +32,14 @@ export async function drainFormattedSystemEvents(params: {
     if (lower.includes("heartbeat poll") || lower.includes("heartbeat wake")) {
       return null;
     }
+    // Filter out WhatsApp gateway connection lifecycle events — these are
+    // informational noise that shouldn't trigger agent turns.
+    if (
+      lower.startsWith("whatsapp gateway connected") ||
+      lower.startsWith("whatsapp gateway disconnected")
+    ) {
+      return null;
+    }
     if (trimmed.startsWith("Node:")) {
       return trimmed.replace(/ · last input [^·]+/i, "").trim();
     }
