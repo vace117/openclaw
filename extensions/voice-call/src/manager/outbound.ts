@@ -306,10 +306,38 @@ export async function speakInitialMessage(
   ctx.initialMessageInFlight.add(call.callId);
 
   try {
-    console.log(`[voice-call] Speaking initial message for call ${call.callId} (mode: ${mode})`);
-    const result = await speak(ctx, call.callId, initialMessage);
-    if (!result.success) {
-      console.warn(`[voice-call] Failed to speak initial message: ${result.error}`);
+    const MAX_SPEAK_ATTEMPTS = 3;
+    const SPEAK_RETRY_DELAY_MS = 2000;
+    let speakSuccess = false;
+
+    for (let attempt = 1; attempt <= MAX_SPEAK_ATTEMPTS; attempt++) {
+      console.log(
+        `[voice-call] Speaking initial message for call ${call.callId} (mode: ${mode}, attempt ${attempt}/${MAX_SPEAK_ATTEMPTS})`,
+      );
+      const result = await speak(ctx, call.callId, initialMessage);
+      if (result.success) {
+        speakSuccess = true;
+        break;
+      }
+      console.warn(
+        `[voice-call] Failed to speak initial message (attempt ${attempt}/${MAX_SPEAK_ATTEMPTS}): ${result.error}`,
+      );
+      if (attempt < MAX_SPEAK_ATTEMPTS) {
+        // Check call is still active before retrying
+        const currentCall = ctx.activeCalls.get(call.callId);
+        if (!currentCall || TerminalStates.has(currentCall.state)) {
+          console.warn(`[voice-call] Call ${call.callId} ended during retry delay — aborting`);
+          return;
+        }
+        await new Promise((resolve) => setTimeout(resolve, SPEAK_RETRY_DELAY_MS));
+      }
+    }
+
+    if (!speakSuccess) {
+      console.error(
+        `[voice-call] All ${MAX_SPEAK_ATTEMPTS} attempts to speak initial message failed for call ${call.callId} — hanging up`,
+      );
+      await endCall(ctx, call.callId, { reason: "error" });
       return;
     }
 
