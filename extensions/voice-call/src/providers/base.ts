@@ -67,6 +67,12 @@ export interface VoiceCallProvider {
   playTts(input: PlayTtsInput): Promise<void>;
 
   /**
+   * Pre-synthesize TTS audio for later playback.
+   * Returns a mu-law 8kHz audio buffer ready for streaming.
+   */
+  preSynthesizeTts?: (text: string) => Promise<Buffer>;
+
+  /**
    * Send DTMF digits to an active call.
    */
   sendDtmf?: (input: SendDtmfInput) => Promise<void>;

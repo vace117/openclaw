@@ -1019,6 +1019,8 @@ importers:
         specifier: workspace:*
         version: link:../../packages/plugin-sdk
 
+  extensions/outbound-whitelist: {}
+
   extensions/perplexity:
     devDependencies:
       '@openclaw/plugin-sdk':

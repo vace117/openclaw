@@ -238,6 +238,8 @@ export type PlayTtsInput = {
   text: string;
   voice?: string;
   locale?: string;
+  /** Pre-synthesized mu-law 8kHz audio buffer, skips TTS synthesis if provided. */
+  preSynthesizedAudio?: Buffer;
 };
 
 export type SendDtmfInput = {

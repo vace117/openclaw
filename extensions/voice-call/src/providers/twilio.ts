@@ -155,6 +155,13 @@ export class TwilioProvider implements VoiceCallProvider {
     this.mediaStreamHandler = handler;
   }
 
+  async preSynthesizeTts(text: string): Promise<Buffer> {
+    if (!this.ttsProvider) {
+      throw new Error("TTS provider not configured");
+    }
+    return this.ttsProvider.synthesizeForTelephony(text);
+  }
+
   registerCallStream(callSid: string, streamSid: string): void {
     this.callStreamMap.set(callSid, streamSid);
   }
@@ -559,7 +566,7 @@ export class TwilioProvider implements VoiceCallProvider {
       }
 
       try {
-        await this.playTtsViaStream(input.text, streamSid);
+        await this.playTtsViaStream(input.text, streamSid, input.preSynthesizedAudio);
         return;
       } catch (err) {
         console.warn(
@@ -616,7 +623,7 @@ export class TwilioProvider implements VoiceCallProvider {
    * Generates audio with core TTS, converts to mu-law, and streams via WebSocket.
    * Uses a queue to serialize playback and prevent overlapping audio.
    */
-  private async playTtsViaStream(text: string, streamSid: string): Promise<void> {
+  private async playTtsViaStream(text: string, streamSid: string, preSynthesizedAudio?: Buffer): Promise<void> {
     if (!this.ttsProvider || !this.mediaStreamHandler) {
       throw new Error("TTS provider and media stream handler required");
     }
@@ -668,23 +675,30 @@ export class TwilioProvider implements VoiceCallProvider {
         }
       }, CHUNK_DELAY_MS);
 
-      // Generate audio with core TTS (returns mu-law at 8kHz)
+      // Use pre-synthesized audio if available, otherwise synthesize now.
       let muLawAudio: Buffer;
-      let synthTimeout: ReturnType<typeof setTimeout> | null = null;
-      const synthTimeoutMs = ttsProvider.synthesisTimeoutMs;
-      try {
-        const synthPromise = ttsProvider.synthesizeForTelephony(text);
-        const timeoutPromise = new Promise<Buffer>((_, reject) => {
-          synthTimeout = setTimeout(() => {
-            reject(new Error(`Telephony TTS synthesis timed out after ${synthTimeoutMs}ms`));
-          }, synthTimeoutMs);
-        });
-        muLawAudio = await Promise.race([synthPromise, timeoutPromise]);
-      } finally {
-        if (synthTimeout) {
-          clearTimeout(synthTimeout);
-        }
+      if (preSynthesizedAudio && preSynthesizedAudio.length > 0) {
+        console.log(`[voice-call] Using pre-synthesized audio (${preSynthesizedAudio.length} bytes)`);
+        muLawAudio = preSynthesizedAudio;
         clearInterval(keepAlive);
+      } else {
+        // Generate audio with core TTS (returns mu-law at 8kHz)
+        let synthTimeout: ReturnType<typeof setTimeout> | null = null;
+        const synthTimeoutMs = ttsProvider.synthesisTimeoutMs;
+        try {
+          const synthPromise = ttsProvider.synthesizeForTelephony(text);
+          const timeoutPromise = new Promise<Buffer>((_, reject) => {
+            synthTimeout = setTimeout(() => {
+              reject(new Error(`Telephony TTS synthesis timed out after ${synthTimeoutMs}ms`));
+            }, synthTimeoutMs);
+          });
+          muLawAudio = await Promise.race([synthPromise, timeoutPromise]);
+        } finally {
+          if (synthTimeout) {
+            clearTimeout(synthTimeout);
+          }
+          clearInterval(keepAlive);
+        }
       }
 
       if (muLawAudio.length === 0) {

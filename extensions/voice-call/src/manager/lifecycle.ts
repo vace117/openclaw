@@ -8,7 +8,7 @@ type CallLifecycleContext = Pick<
   CallManagerContext,
   "activeCalls" | "providerCallIdMap" | "storePath"
 > &
-  Partial<Pick<CallManagerContext, "transcriptWaiters" | "maxDurationTimers">>;
+  Partial<Pick<CallManagerContext, "transcriptWaiters" | "maxDurationTimers" | "preSynthesizedAudio">>;
 
 function removeProviderCallMapping(
   providerCallIdMap: Map<string, string>,
@@ -48,6 +48,7 @@ export function finalizeCall(params: {
     );
   }
 
+  ctx.preSynthesizedAudio?.delete(call.callId);
   ctx.activeCalls.delete(call.callId);
   removeProviderCallMapping(ctx.providerCallIdMap, call);
 }

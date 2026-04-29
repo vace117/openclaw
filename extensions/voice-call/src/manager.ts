@@ -77,6 +77,7 @@ export class CallManager {
   >();
   private maxDurationTimers = new Map<CallId, NodeJS.Timeout>();
   private initialMessageInFlight = new Set<CallId>();
+  private preSynthesizedAudio = new Map<CallId, Promise<Buffer>>();
 
   constructor(config: VoiceCallConfig, storePath?: string) {
     this.config = config;
@@ -294,6 +295,7 @@ export class CallManager {
       transcriptWaiters: this.transcriptWaiters,
       maxDurationTimers: this.maxDurationTimers,
       initialMessageInFlight: this.initialMessageInFlight,
+      preSynthesizedAudio: this.preSynthesizedAudio,
       onCallAnswered: (call) => {
         this.maybeSpeakInitialMessageOnAnswered(call);
       },

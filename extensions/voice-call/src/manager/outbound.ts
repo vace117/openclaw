@@ -20,7 +20,7 @@ import { generateNotifyTwiml } from "./twiml.js";
 
 type InitiateContext = Pick<
   CallManagerContext,
-  "activeCalls" | "providerCallIdMap" | "provider" | "config" | "storePath" | "webhookUrl"
+  "activeCalls" | "providerCallIdMap" | "provider" | "config" | "storePath" | "webhookUrl" | "preSynthesizedAudio"
 >;
 
 type SpeakContext = Pick<
@@ -39,6 +39,7 @@ type ConversationContext = Pick<
   | "transcriptWaiters"
   | "maxDurationTimers"
   | "initialMessageInFlight"
+  | "preSynthesizedAudio"
 >;
 
 type EndCallContext = Pick<
@@ -182,6 +183,19 @@ export async function initiateCall(
     ctx.providerCallIdMap.set(result.providerCallId, callId);
     persistCallRecord(ctx.storePath, callRecord);
 
+    // Pre-synthesize TTS for the initial message while the phone rings.
+    // The audio buffer will be ready by the time the call connects,
+    // eliminating synthesis delay after answer.
+    if (mode === "conversation" && initialMessage && ctx.provider?.preSynthesizeTts) {
+      console.log(`[voice-call] Pre-synthesizing TTS for call ${callId} (${initialMessage.length} chars)`);
+      const synthPromise = ctx.provider.preSynthesizeTts(initialMessage).catch((err) => {
+        console.warn(`[voice-call] Pre-synthesis failed for call ${callId}: ${formatErrorMessage(err)} — will synthesize on demand`);
+        ctx.preSynthesizedAudio.delete(callId);
+        return undefined as unknown as Buffer;
+      });
+      ctx.preSynthesizedAudio.set(callId, synthPromise);
+    }
+
     return { callId, success: true };
   } catch (err) {
     finalizeCall({
@@ -202,6 +216,7 @@ export async function speak(
   ctx: SpeakContext,
   callId: CallId,
   text: string,
+  options?: { preSynthesizedAudio?: Buffer },
 ): Promise<{ success: boolean; error?: string }> {
   const connected = requireConnectedCall(ctx, callId);
   if (!connected.ok) {
@@ -219,6 +234,7 @@ export async function speak(
       providerCallId,
       text,
       voice,
+      preSynthesizedAudio: options?.preSynthesizedAudio,
     });
 
     addTranscriptEntry(call, "bot", text);
@@ -310,11 +326,31 @@ export async function speakInitialMessage(
     const SPEAK_RETRY_DELAY_MS = 2000;
     let speakSuccess = false;
 
+    // Retrieve pre-synthesized audio if available (synthesized during ring time).
+    let preSynthesizedAudio: Buffer | undefined;
+    const synthPromise = ctx.preSynthesizedAudio.get(call.callId);
+    if (synthPromise) {
+      try {
+        preSynthesizedAudio = await synthPromise;
+        if (preSynthesizedAudio && preSynthesizedAudio.length > 0) {
+          console.log(`[voice-call] Pre-synthesized audio ready for call ${call.callId} (${preSynthesizedAudio.length} bytes)`);
+        } else {
+          preSynthesizedAudio = undefined;
+        }
+      } catch {
+        console.warn(`[voice-call] Pre-synthesized audio failed for call ${call.callId} — will synthesize on demand`);
+        preSynthesizedAudio = undefined;
+      }
+      ctx.preSynthesizedAudio.delete(call.callId);
+    }
+
     for (let attempt = 1; attempt <= MAX_SPEAK_ATTEMPTS; attempt++) {
       console.log(
         `[voice-call] Speaking initial message for call ${call.callId} (mode: ${mode}, attempt ${attempt}/${MAX_SPEAK_ATTEMPTS})`,
       );
-      const result = await speak(ctx, call.callId, initialMessage);
+      // Use pre-synthesized audio only on first attempt; retries synthesize fresh.
+      const speakOpts = attempt === 1 && preSynthesizedAudio ? { preSynthesizedAudio } : undefined;
+      const result = await speak(ctx, call.callId, initialMessage, speakOpts);
       if (result.success) {
         speakSuccess = true;
         break;
